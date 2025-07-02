@@ -2,15 +2,15 @@ module chop_locker::chop_locker {
     
     use sui::coin::{Self, Coin, TreasuryCap};
     use sui::clock::{Self, Clock};
-    use sui::object::{Self, UID};
+    // use sui::object::{Self, UID};
     use sui::balance::{Self, Balance};
-    use sui::tx_context::{Self, TxContext};
-    use sui::transfer;
-    use sui::math;
-    use sui::config;
+    // use sui::tx_context::{Self, TxContext};
+    // use sui::transfer;
+    // use sui::math;
+    // use sui::config;
 
-    /// Error codes
-    const ENotAdmin: u64 = 0;
+    // Error codes
+    // const ENotAdmin: u64 = 0;
     const ELockPeriodNotEnded: u64 = 1;
     const ENoTokensLocked: u64 = 2;
     const EInsufficientRewards: u64 = 3;
@@ -202,7 +202,7 @@ module chop_locker::chop_locker {
         calculate_apy(config)
     }
 
-    /// Helper function to get lock period
+    // Helper function to get lock period
     // public fun get_lock_period<T0>(config: &PoolConfig<T0>): u64 {
     //     config.lock_period
     // }
