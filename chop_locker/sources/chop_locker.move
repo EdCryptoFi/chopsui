@@ -4,6 +4,7 @@ module chop_locker::chop_locker {
     use sui::clock::{Self, Clock};
     // use sui::object::{Self, UID};
     use sui::balance::{Self, Balance};
+    use std::string::{String};
     // use sui::tx_context::{Self, TxContext};
     // use sui::transfer;
     // use sui::math;
@@ -35,7 +36,8 @@ module chop_locker::chop_locker {
         staked: Balance<T0>,
         start_time: u64, // Timestamp when tokens were locked
         end_time: u64,
-        locked_in_apy: u64
+        locked_in_apy: u64,
+        token_type: String
     }
 
     /// Initialize the contract
@@ -105,6 +107,7 @@ module chop_locker::chop_locker {
         tokens: Coin<T0>,
         clock: &Clock,
         ms_locked: u64,
+        token_type: String,
         ctx: &mut TxContext
     ) {
         let amount = coin::value(&tokens);
@@ -122,7 +125,8 @@ module chop_locker::chop_locker {
             staked: coin::into_balance(tokens),
             start_time: current_time,
             end_time: current_time + ms_locked,
-            locked_in_apy: increase_by_basis_points(apy, days * config.apy_daily_increment)
+            locked_in_apy: increase_by_basis_points(apy, days * config.apy_daily_increment),
+            token_type: token_type
         };
         transfer::transfer(lock, tx_context::sender(ctx));
     }
@@ -184,7 +188,8 @@ module chop_locker::chop_locker {
             staked, 
             start_time: _,
             end_time: _,
-            locked_in_apy: _
+            locked_in_apy: _,
+            token_type: _
             } = lock; // needs to be done like this so we get the uid to delete
         let amount = balance::value(&staked);
         object::delete(id);
