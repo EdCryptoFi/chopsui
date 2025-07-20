@@ -16,27 +16,41 @@ module chop_locker::chop_locker {
     const ENoTokensLocked: u64 = 2;
     const EInsufficientRewards: u64 = 3;
 
-    const EZeroTotalStaked: u64 = 1;
-    const EZeroRewardPool: u64 = 2;
-    const EZeroEmissionPeriods: u64 = 3;
-    const EZeroRewardPeriod: u64 = 4;
-    const DECIMAL_SCALE: u64 = 1_000_000_000; // 9 decimals for token balances
-    const APY_SCALE: u64 = 1_000_000; // 6 decimals for APY precision
-    const MAX_APY: u64 = 50_000_000; // 50% APY cap
-    const DAYS_PER_YEAR: u64 = 365;
+    // const EZeroTotalStaked: u64 = 1;
+    // const EZeroRewardPool: u64 = 2;
+    // const EZeroEmissionPeriods: u64 = 3;
+    // const EZeroRewardPeriod: u64 = 4;
+    const PoolAlreadyExists: u64 = 5;
+    // const DECIMAL_SCALE: u64 = 1_000_000_000; // 9 decimals for token balances
+    // const APY_SCALE: u64 = 1_000_000; // 6 decimals for APY precision
+    // const MAX_APY: u64 = 50_000_000; // 50% APY cap
+    // const DAYS_PER_YEAR: u64 = 365;
 
-    const EZeroStakedBalance: u64 = 5;
-const EArithmeticOverflow: u64 = 6;
-const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
+    // const EZeroStakedBalance: u64 = 5;
+    // const EArithmeticOverflow: u64 = 6;
+    // const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
 
     /// Admin capability to fund rewards
     public struct ChopLockerAdmin has key { id: UID }
+
+    public struct PoolAdmin has key { 
+        id: UID,
+        poolAddy: address,
+        token_type: String
+    }
+
+    public struct PoolDirectory has key {
+        id: UID,
+        token_types: vector<String>
+    }
 
     /// Staking pool configuration (owned by admin)
     public struct PoolConfig<phantom T0> has key {
         id: UID,
         total_staked: u64, // Total tokens staked across all users
-        reward_balance: Balance<T0>, // Balance for paying rewards
+        reward_balance: Balance<T0>, // Balance for paying rewards,
+        token_type: String,
+        active_lockers: u64
     }
 
     /// User-specific lock object (owned by user)
@@ -47,7 +61,8 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
         end_time: u64,
         locked_in_apy: u64,
         token_type: String,
-        rewards_locked: Balance<T0>
+        rewards_locked: Balance<T0>,
+        pool_config: address
     }
 
     /// Initialize the contract
@@ -56,19 +71,36 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
         // Create AdminCap and transfer to sender
         let admin_cap = ChopLockerAdmin { id: object::new(ctx) };
         transfer::transfer(admin_cap, tx_context::sender(ctx));
+        let pool_directory = PoolDirectory {
+            id: object::new(ctx),
+            token_types: vector::empty()
+        };
+        transfer::share_object(pool_directory);
 
         // Transfer TreasuryCap to sender
         // transfer::public_transfer(treasury_cap, tx_context::sender(ctx));
     }
 
-    public fun new_pool_config<T0>(_admin: &ChopLockerAdmin, coin: Coin<T0>, ctx: &mut TxContext) {
+    public fun new_pool_config<T0>(pool_directory: &mut PoolDirectory, coin: Coin<T0>, token_type: String, ctx: &mut TxContext) {
+        assert!(!pool_directory.token_types.contains(&token_type), PoolAlreadyExists);
         let balance = coin::into_balance(coin);
+        let poolId = object::new(ctx);
+        let poolAddy = object::uid_to_address(&poolId);
         let pool_config = PoolConfig<T0> {
-            id: object::new(ctx),
+            id: poolId,
             // lock_period: lock_period, //30 * 24 * 60 * 60 * 1000, // 30 days in milliseconds
             total_staked: 0,
             reward_balance: balance,
+            token_type: token_type,
+            active_lockers: 0
         };
+        let pool_admin = PoolAdmin {
+            id: object::new(ctx),
+            poolAddy: poolAddy,
+            token_type: token_type
+        };
+        vector::insert(&mut pool_directory.token_types, token_type, 0);
+        transfer::transfer(pool_admin, tx_context::sender(ctx));
         transfer::share_object(pool_config);
     }
 
@@ -80,7 +112,7 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
             let tep = 365;
             let rpa = rps / tep;
             let mx =  ((100*d)/(90)) + 50;
-            let apy = ((100*si)/ tst) * ((100*rpa) / tep) * mx * tep; 
+            let apy = ((1000*si)/ tst) * ((100*rpa) / tep) * mx * tep; 
             apy/1000000000 //with 10^4 on end
         } else {
             180000 // = 18%
@@ -104,14 +136,24 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
     // }
 
     /// Admin funds the reward pool by minting tokens
-    public entry fun fund_rewards<T0>(
+    public entry fun fund_rewards_override<T0>(
         _: &ChopLockerAdmin,
-        treasury: &mut TreasuryCap<T0>,
         config: &mut PoolConfig<T0>,
         amount: u64,
+        reward_coins: Coin<T0>,
         ctx: &mut TxContext
     ) {
-        let reward_coins = coin::mint(treasury, amount, ctx);
+        balance::join(&mut config.reward_balance, coin::into_balance(reward_coins));
+    }
+
+    public entry fun fund_rewards<T0>(
+        poolAdmin: &PoolAdmin,
+        config: &mut PoolConfig<T0>,
+        amount: u64,
+        reward_coins: Coin<T0>,
+        ctx: &mut TxContext
+    ) {
+        assert!(poolAdmin.poolAddy == object::uid_to_address(&config.id), 6);
         balance::join(&mut config.reward_balance, coin::into_balance(reward_coins));
     }
 
@@ -129,7 +171,11 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
 
         // Update total staked
         let days = (ms_locked / 86400000) + 1;
-        let apy = calculate_apy(config, tokens.balance().value(),  days);
+        let mut apy = 0;
+        if(config.reward_balance.value() > 0){
+            apy = calculate_apy(config, tokens.balance().value(),  days);
+        };
+        
         let current_time = clock::timestamp_ms(clock);
 
         config.total_staked = config.total_staked + amount;
@@ -139,6 +185,12 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
         let reward_amount_tmp = (tokens.balance().value() / 1000) * apy_and_days_calc; // -3
         //= +4
         let reward_amount = reward_amount_tmp / 10000;
+        let newBalance: Balance<T0>;
+        if(config.reward_balance.value() > 0){
+            newBalance = withdraw_from_balance(&mut config.reward_balance, reward_amount, ctx);
+        }else{
+            newBalance = balance::zero();
+        };
 
         let lock = Lock {
             id: object::new(ctx),
@@ -147,12 +199,14 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
             end_time: current_time + ms_locked,
             locked_in_apy: apy,
             token_type: token_type,
-            rewards_locked: withdraw_from_balance(&mut config.reward_balance, reward_amount, ctx)
+            rewards_locked: newBalance,
+            pool_config: object::uid_to_address(&config.id)
         };
+        config.active_lockers = config.active_lockers + 1;
         transfer::transfer(lock, tx_context::sender(ctx));
     }
 
-    public fun withdraw_from_balance<T0>(balance_obj: &mut Balance<T0>, amount: u64, ctx: &mut TxContext): Balance<T0> {
+    fun withdraw_from_balance<T0>(balance_obj: &mut Balance<T0>, amount: u64, ctx: &mut TxContext): Balance<T0> {
         assert!(balance::value(balance_obj) >= amount, EInsufficientRewards);
         let withdrawn_balance = balance::split(balance_obj, amount);
         withdrawn_balance
@@ -217,7 +271,8 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
             end_time: _,
             locked_in_apy: _,
             token_type: _,
-            rewards_locked
+            rewards_locked,
+            pool_config: _
             } = lock; // needs to be done like this so we get the uid to delete
         let amount = balance::value(&staked);
         object::delete(id);
@@ -228,6 +283,7 @@ const MAX_U128: u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
         // Return staked tokens
         let tokens = coin::from_balance(staked, ctx);
         let rewards = coin::from_balance(rewards_locked, ctx);
+        config.active_lockers = config.active_lockers - 1;
         transfer::public_transfer(tokens, tx_context::sender(ctx));
         transfer::public_transfer(rewards, tx_context::sender(ctx));
     }
