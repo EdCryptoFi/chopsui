@@ -72,7 +72,7 @@
 //         let ratio = (remaining_pool * SCALING_FACTOR) / total_pool;
 //         math::sqrt(ratio)
 //     }
-
+ 
 //     // Calculate adjusted reward rate: r_adjusted = r * F
 //     fun calculate_adjusted_reward_rate(base_rate: u64, remaining_pool: u64, total_pool: u64): u64 {
 //         let f = calculate_depletion_factor(remaining_pool, total_pool);
