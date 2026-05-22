@@ -4,25 +4,57 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { ConnectButton } from '@mysten/dapp-kit';
+import { useCurrentAccount } from '@mysten/dapp-kit';
+import { useChopBalance } from '@/hooks/useChopBalance';
+import { usePoolConfig } from '@/hooks/usePoolConfig';
+import { useLockTokens } from '@/hooks/useLockTokens';
+import { CHOP_POOL_CONFIG_ID } from '@/lib/constants';
+import { formatToken } from '@/lib/format';
+
+const MIN_APY = 10;
+const MAX_APY = 25;
+const MIN_DAYS = 1;
+const MAX_DAYS = 365;
+
+function calculateAPY(days: number, maxApy = MAX_APY): number {
+  if (days < MIN_DAYS || days > MAX_DAYS) return MIN_APY;
+  return MIN_APY + ((maxApy - MIN_APY) * (days - 1)) / (MAX_DAYS - 1);
+}
 
 export default function LockPage() {
   const [amount, setAmount] = useState('');
   const [duration, setDuration] = useState(30);
-  const [showWarning, setShowWarning] = useState(false);
 
-  // Calculate APY based on duration
-  const calculateAPY = (days: number) => {
-    const MIN_APY = 10;
-    const MAX_APY = 25;
-    const MIN_DAYS = 1;
-    const MAX_DAYS = 365;
+  const account = useCurrentAccount();
+  const { rawBalance, balance, refetch: refetchBalance } = useChopBalance();
+  const { poolConfig } = usePoolConfig(CHOP_POOL_CONFIG_ID);
+  const { lockTokens, status, error, digest } = useLockTokens();
 
-    if (days < MIN_DAYS || days > MAX_DAYS) return MIN_APY;
-    return MIN_APY + ((MAX_APY - MIN_APY) * (days - 1)) / (MAX_DAYS - 1);
-  };
+  const poolMaxApy = poolConfig
+    ? Number(poolConfig.maxApy) / 1_000_000_000
+    : MAX_APY;
 
-  const apy = calculateAPY(duration);
+  const apy = calculateAPY(duration, poolMaxApy);
   const estimatedReward = amount ? (parseFloat(amount) * apy) / 100 : 0;
+
+  const isLoading = status === 'pending';
+  const isSuccess = status === 'success';
+  const isError = status === 'error';
+
+  async function handleLock() {
+    if (!account?.address) return;
+    await lockTokens(account.address, { amountInput: amount, days: duration });
+    if (status === 'success') {
+      setAmount('');
+      refetchBalance();
+    }
+  }
+
+  function handleMax() {
+    if (rawBalance > 0n) {
+      setAmount(formatToken(rawBalance).replace(/[KM,]/g, ''));
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0e27]">
@@ -64,6 +96,13 @@ export default function LockPage() {
             Lock your CHOP tokens and earn dynamic APY rewards
           </p>
 
+          {!account && (
+            <div className="text-center mb-8 p-6 border border-[#FF006E]/30 rounded-lg bg-[#FF006E]/5">
+              <p className="text-gray-300 mb-4">Connect your wallet to lock tokens</p>
+              <ConnectButton />
+            </div>
+          )}
+
           {/* Main Card */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -81,8 +120,24 @@ export default function LockPage() {
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0.00"
                 className="input-field text-2xl"
+                disabled={isLoading}
               />
-              <p className="text-gray-400 text-sm mt-2">Balance: 0.00 CHOP</p>
+              <div className="flex justify-between items-center mt-2">
+                <p className="text-gray-400 text-sm">
+                  Balance:{' '}
+                  <span className="text-white font-bold">
+                    {account ? `${balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} CHOP` : '—'}
+                  </span>
+                </p>
+                {account && rawBalance > 0n && (
+                  <button
+                    onClick={handleMax}
+                    className="text-[#FF006E] text-sm font-bold hover:underline"
+                  >
+                    MAX
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Duration Slider */}
@@ -100,6 +155,7 @@ export default function LockPage() {
                 value={duration}
                 onChange={(e) => setDuration(parseInt(e.target.value))}
                 className="w-full h-3 bg-[#0a0e27] rounded-lg appearance-none cursor-pointer accent-[#FF006E]"
+                disabled={isLoading}
               />
               <div className="flex justify-between text-gray-400 text-xs mt-2">
                 <span>1 Day</span>
@@ -115,14 +171,41 @@ export default function LockPage() {
               </div>
               <div className="bg-[#0a0e27] border border-[#FF006E]/30 rounded-lg p-4">
                 <p className="text-gray-400 text-sm uppercase font-bold">Est. Rewards</p>
-                <p className="text-3xl font-bold text-[#00D9FF] mt-2">{estimatedReward.toFixed(2)}</p>
+                <p className="text-3xl font-bold text-[#00D9FF] mt-2">
+                  {estimatedReward.toLocaleString(undefined, { maximumFractionDigits: 2 })} CHOP
+                </p>
               </div>
             </div>
 
+            {/* Status messages */}
+            {isSuccess && digest && (
+              <div className="mb-4 p-4 bg-green-900/30 border border-green-500 rounded-lg">
+                <p className="text-green-400 font-bold">Tokens locked successfully!</p>
+                <p className="text-gray-400 text-sm mt-1 break-all">Tx: {digest}</p>
+              </div>
+            )}
+            {isError && error && (
+              <div className="mb-4 p-4 bg-red-900/30 border border-red-500 rounded-lg">
+                <p className="text-red-400 font-bold">Error: {error}</p>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex gap-4">
-              <button className="btn-primary flex-1">Approve & Lock</button>
-              <button className="btn-secondary flex-1">Max Amount</button>
+              <button
+                onClick={handleLock}
+                disabled={!account || isLoading || !amount}
+                className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Locking...' : 'Approve & Lock'}
+              </button>
+              <button
+                onClick={handleMax}
+                disabled={!account || rawBalance === 0n}
+                className="btn-secondary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Max Amount
+              </button>
             </div>
           </motion.div>
 

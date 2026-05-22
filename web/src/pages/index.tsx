@@ -4,15 +4,31 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ConnectButton } from '@mysten/dapp-kit';
 import { motion } from 'framer-motion';
+import { usePoolConfig } from '@/hooks/usePoolConfig';
+import { CHOP_POOL_CONFIG_ID } from '@/lib/constants';
+import { formatToken, formatMaxApy } from '@/lib/format';
 
 export default function Home() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { poolConfig } = usePoolConfig(CHOP_POOL_CONFIG_ID);
 
   const stats = [
-    { label: 'Total Staked', value: '$2.4M' },
-    { label: 'Active Locks', value: '1,234' },
-    { label: 'Avg APY', value: '18.5%' },
-    { label: 'Rewards Distributed', value: '$450K' },
+    {
+      label: 'Total Staked',
+      value: poolConfig ? formatToken(poolConfig.totalStaked) + ' CHOP' : '—',
+    },
+    {
+      label: 'Active Locks',
+      value: poolConfig ? String(poolConfig.activeLockers) : '—',
+    },
+    {
+      label: 'Max APY',
+      value: poolConfig ? formatMaxApy(poolConfig.maxApy) : '—',
+    },
+    {
+      label: 'Reward Pool',
+      value: poolConfig ? formatToken(poolConfig.rewardBalance) + ' CHOP' : '—',
+    },
   ];
 
   const features = [
